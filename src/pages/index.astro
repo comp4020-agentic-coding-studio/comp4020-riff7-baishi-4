@@ -6,6 +6,11 @@ const roster = listRoster();
 const weeks = listWeeks();
 const error = Astro.url.searchParams.get("error");
 const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri"];
+
+// The weekly timetable reuses the same roster rows the group list and the
+// reschedule form already fetch — no separate schedule data to keep in sync.
+const startTimes = [...new Set(roster.map((g) => g.startTime))].sort();
+const tutorCount = new Set(roster.map((g) => g.tutorName)).size;
 ---
 
 <!doctype html>
@@ -22,18 +27,27 @@ const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri"];
   </head>
   <body>
     <nav aria-label="site">
-      <a href="/">Roster</a>
-      <a href="/readme/">About</a>
+      <span class="brand">Crit roster</span>
+      <div class="nav-links">
+        <a href="/">Roster</a>
+        <a href="/readme/">About</a>
+      </div>
     </nav>
     <main>
-      <h1>Crit roster</h1>
-      <p>
-        Every crit group's standing weekly slot, and the exceptions that
-        replace it for one teaching week at a time — rescheduling a session
-        here writes a row to SQLite instead of hand-editing the course
-        website's <code>api/crit-groups.json</code>. Open this page in two
-        tabs: rescheduling in one updates the other over the live stream.
-      </p>
+      <header class="hero">
+        <p class="eyebrow">COMP4020 · crit groups</p>
+        <h1>Crit roster</h1>
+        <p class="lede">
+          Every crit group's standing weekly slot, and the exceptions that
+          replace it for one teaching week at a time.
+        </p>
+        <p class="hero-note">
+          Rescheduling here writes a row to SQLite instead of hand-editing the
+          course website's <code>api/crit-groups.json</code>. Open this page
+          in two tabs: rescheduling in one updates the other over the live
+          stream.
+        </p>
+      </header>
 
       {error && <p class="error" role="alert">{error}</p>}
       <p id="stale-notice" class="notice" role="status" hidden>
@@ -41,81 +55,154 @@ const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri"];
         reload when you're ready to see the update.
       </p>
 
-      {
-        roster.map((group) => {
-          const exceptionSessions = group.sessions.filter((s) => s.exceptionId !== null);
-          return (
-            <section aria-labelledby={`group-${group.agent}`}>
-              <h2 id={`group-${group.agent}`}>{group.name}</h2>
-              <p>
-                Standing slot: every {group.day} {group.startTime}–{group.endTime} ·{" "}
-                {group.tutorName} · {group.room}
-              </p>
-              {exceptionSessions.length === 0 ? (
-                <p>No exceptions this semester — meets at its standing slot every teaching week.</p>
-              ) : (
-                <ul>
-                  {exceptionSessions.map((session) => (
-                    <li>
-                      Week {session.week} ({session.date}): now {session.day}{" "}
-                      {session.startTime}–{session.endTime} in {session.room} —{" "}
-                      {session.reason}
-                      <form method="post" action={`/api/exceptions/${session.exceptionId}/cancel`}>
-                        <button type="submit">Cancel, back to standing slot</button>
-                      </form>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </section>
-          );
-        })
-      }
+      <ul class="facts" aria-label="At a glance">
+        <li><strong>{roster.length}</strong><span>crit groups</span></li>
+        <li><strong>{weeks.length}</strong><span>teaching weeks</span></li>
+        <li><strong>{tutorCount}</strong><span>tutors</span></li>
+        <li><strong>Live</strong><span>synced across tabs</span></li>
+      </ul>
 
-      <form method="post" action="/api/exceptions">
-        <fieldset>
-          <legend>Reschedule a session</legend>
-
-          <label for="critGroupId">Crit group</label>
-          <select id="critGroupId" name="critGroupId" required>
-            {roster.map((group) => (
-              <option value={group.id}>
-                {group.name} ({group.day} {group.startTime}–{group.endTime})
-              </option>
+      <h2 id="timetable-heading">Weekly timetable</h2>
+      <p class="section-lede">
+        Every group's standing slot at a glance — pick a slot to jump to its
+        details and any week-by-week changes below.
+      </p>
+      <div class="timetable-scroll">
+        <table aria-labelledby="timetable-heading">
+          <caption class="sr-only">Crit groups by day and time</caption>
+          <thead>
+            <tr>
+              <th scope="col">Time</th>
+              {DAYS.map((day) => <th scope="col">{day}</th>)}
+            </tr>
+          </thead>
+          <tbody>
+            {startTimes.map((startTime) => (
+              <tr>
+                <th scope="row">{startTime}</th>
+                {DAYS.map((day) => {
+                  const cellGroups = roster.filter((g) => g.day === day && g.startTime === startTime);
+                  return (
+                    <td>
+                      {cellGroups.map((g) => (
+                        <a class="slot" href={`#group-${g.agent}`}>
+                          <span class="slot-name">{g.name}</span>
+                          <span class="slot-time">{g.startTime}–{g.endTime}</span>
+                          <span class="slot-meta">{g.tutorName}</span>
+                        </a>
+                      ))}
+                    </td>
+                  );
+                })}
+              </tr>
             ))}
-          </select>
+          </tbody>
+        </table>
+      </div>
 
-          <label for="week">Teaching week</label>
-          <select id="week" name="week" required>
-            {weeks.map((w) => (
-              <option value={w.week}>
-                Week {w.week} ({w.monday})
-              </option>
-            ))}
-          </select>
+      <h2 id="groups-heading">Crit groups</h2>
+      <p class="section-lede">
+        Each group's standing slot, plus any exceptions on file for a single
+        teaching week.
+      </p>
+      <div class="group-grid" aria-labelledby="groups-heading">
+        {
+          roster.map((group) => {
+            const exceptionSessions = group.sessions.filter((s) => s.exceptionId !== null);
+            return (
+              <section class="card group-card" id={`group-${group.agent}`} aria-labelledby={`group-heading-${group.agent}`}>
+                <h3 id={`group-heading-${group.agent}`}>{group.name}</h3>
+                <p class="standing-slot">
+                  Standing slot: every {group.day} {group.startTime}–{group.endTime} ·{" "}
+                  {group.tutorName} · {group.room}
+                </p>
+                {exceptionSessions.length === 0 ? (
+                  <p class="no-exceptions">No exceptions this semester — meets at its standing slot every teaching week.</p>
+                ) : (
+                  <ul class="exceptions">
+                    {exceptionSessions.map((session) => (
+                      <li>
+                        <div class="exception-head">
+                          <span class="badge">Week {session.week}</span>
+                          <span class="exception-date">{session.date}</span>
+                        </div>
+                        <p class="exception-detail">
+                          Now {session.day} {session.startTime}–{session.endTime} in {session.room} —{" "}
+                          {session.reason}
+                        </p>
+                        <form method="post" action={`/api/exceptions/${session.exceptionId}/cancel`}>
+                          <button type="submit" class="btn btn-ghost">Cancel, back to standing slot</button>
+                        </form>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </section>
+            );
+          })
+        }
+      </div>
 
-          <label for="day">New day</label>
-          <select id="day" name="day" required>
-            {DAYS.map((day) => (
-              <option value={day}>{day}</option>
-            ))}
-          </select>
+      <div class="card form-card">
+        <form method="post" action="/api/exceptions">
+          <fieldset>
+            <legend>Reschedule a session</legend>
 
-          <label for="startTime">New start</label>
-          <input id="startTime" name="startTime" type="time" required />
+            <div class="field">
+              <label for="critGroupId">Crit group</label>
+              <select id="critGroupId" name="critGroupId" required>
+                {roster.map((group) => (
+                  <option value={group.id}>
+                    {group.name} ({group.day} {group.startTime}–{group.endTime})
+                  </option>
+                ))}
+              </select>
+            </div>
 
-          <label for="endTime">New end</label>
-          <input id="endTime" name="endTime" type="time" required />
+            <div class="field">
+              <label for="week">Teaching week</label>
+              <select id="week" name="week" required>
+                {weeks.map((w) => (
+                  <option value={w.week}>
+                    Week {w.week} ({w.monday})
+                  </option>
+                ))}
+              </select>
+            </div>
 
-          <label for="room">Room</label>
-          <input id="room" name="room" type="text" placeholder="defaults to the group's usual room" />
+            <div class="field">
+              <label for="day">New day</label>
+              <select id="day" name="day" required>
+                {DAYS.map((day) => (
+                  <option value={day}>{day}</option>
+                ))}
+              </select>
+            </div>
 
-          <label for="reason">Reason</label>
-          <input id="reason" name="reason" type="text" required />
+            <div class="field">
+              <label for="startTime">New start</label>
+              <input id="startTime" name="startTime" type="time" required />
+            </div>
 
-          <button type="submit">Reschedule</button>
-        </fieldset>
-      </form>
+            <div class="field">
+              <label for="endTime">New end</label>
+              <input id="endTime" name="endTime" type="time" required />
+            </div>
+
+            <div class="field">
+              <label for="room">Room</label>
+              <input id="room" name="room" type="text" placeholder="defaults to the group's usual room" />
+            </div>
+
+            <div class="field field-wide">
+              <label for="reason">Reason</label>
+              <input id="reason" name="reason" type="text" required />
+            </div>
+
+            <button type="submit" class="btn btn-primary">Reschedule</button>
+          </fieldset>
+        </form>
+      </div>
     </main>
     <script>
       import { createDirtyTracker, createReconnectGate } from "../lib/live-reload";

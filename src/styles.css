@@ -197,6 +197,44 @@ div.form-card {
   font-size: 0.9rem;
 }
 
+/* Signed-in-as panel -------------------------------------------------------- */
+
+.you-panel {
+  margin: 0 0 2.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.you-eyebrow {
+  margin: 0;
+  color: var(--color-accent);
+  font-weight: 600;
+  font-size: 0.75rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.you-line {
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+.you-line a {
+  font-weight: 600;
+}
+
+.you-slot {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: 0.92rem;
+}
+
+.you-link {
+  align-self: flex-start;
+  margin-block-start: 0.4rem;
+}
+
 /* Section headings -------------------------------------------------------- */
 
 #timetable-heading,
@@ -273,9 +311,22 @@ tbody tr:last-child :is(th, td) {
   transform: translateY(-1px);
 }
 
+.slot-mine {
+  box-shadow: 0 0 0 1px var(--color-accent) inset;
+}
+
 .slot-name {
   font-weight: 600;
   color: var(--color-accent-dark);
+}
+
+.slot-you-tag {
+  margin-inline-start: 0.35rem;
+  font-size: 0.65rem;
+  font-weight: 700;
+  color: var(--color-accent-dark);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
 }
 
 .slot-time,
@@ -301,8 +352,20 @@ tbody tr:last-child :is(th, td) {
   padding: 1.25rem 1.4rem;
 }
 
-.group-card h3 {
+.group-card-mine {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 1px var(--color-accent), var(--shadow-card);
+}
+
+.group-card-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
   margin: 0 0 0.35rem;
+}
+
+.group-card-head h3 {
+  margin: 0;
   font-size: 1.1rem;
 }
 
@@ -316,6 +379,13 @@ tbody tr:last-child :is(th, td) {
   margin: 0;
   color: var(--color-text-muted);
   font-size: 0.9rem;
+}
+
+.view-only-note {
+  margin: 0.75rem 0 0;
+  color: var(--color-text-muted);
+  font-size: 0.8rem;
+  font-style: italic;
 }
 
 .exceptions {
@@ -470,6 +540,19 @@ select:hover {
 
 .form-card button[type="submit"] {
   justify-self: start;
+}
+
+.field-hint {
+  grid-column: 1 / -1;
+  margin: -0.25rem 0 0;
+  color: var(--color-text-muted);
+  font-size: 0.85rem;
+}
+
+.end-preview {
+  margin-block-start: 0.3rem;
+  color: var(--color-text-muted);
+  font-size: 0.8rem;
 }
 
 /* Notices ------------------------------------------------------------------------- */

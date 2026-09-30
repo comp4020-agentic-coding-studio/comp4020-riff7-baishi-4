@@ -154,19 +154,48 @@ export function listRoster(): RosterGroup[] {
   }));
 }
 
-const DAY_NAMES = new Set(["Mon", "Tue", "Wed", "Thu", "Fri"]);
+const DAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri"];
 const TIME_RE = /^([01]\d|2[0-3]):([0-5]\d)$/;
+const SESSION_MINUTES = 90;
 
 export class ValidationError extends Error {}
 
+// Thrown when the acting tutor doesn't own the crit group a write targets —
+// a request the UI never offers (edit/cancel controls only render for a
+// tutor's own group, see index.astro), so this only fires against a
+// hand-crafted request. Kept distinct from ValidationError so the route
+// handlers can answer it with a flat 403 instead of the friendly
+// redirect-with-message a genuine form mistake gets.
+export class PermissionError extends Error {}
+
+// Every date a (week, day) pair can resolve to, so a raw calendar date typed
+// into the reschedule form can be resolved back to the week/day pair the
+// table actually keys exceptions by — the inverse of sessionDate.
+export function resolveSessionDate(date: string): { week: number; day: string } | undefined {
+  for (const w of listWeeks()) {
+    for (const day of DAY_NAMES) {
+      if (sessionDate(w.monday, day) === date) return { week: w.week, day };
+    }
+  }
+  return undefined;
+}
+
+// Every session is exactly 90 minutes — the form only takes a start time,
+// this is the one place the end time is computed from it.
+function addSessionMinutes(startTime: string): string {
+  const [h, m] = startTime.split(":").map(Number);
+  const total = h * 60 + m + SESSION_MINUTES;
+  if (total >= 24 * 60) throw new ValidationError("a 90-minute session starting this late would run past midnight");
+  return `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
+}
+
 export type AddExceptionInput = {
   critGroupId: number;
-  week: number;
-  day: string;
+  date: string;
   startTime: string;
-  endTime: string;
   room: string;
   reason: string;
+  actingAgent: string;
 };
 
 // The one write this app makes to a group's schedule: reschedule a single
@@ -175,15 +204,15 @@ export type AddExceptionInput = {
 export function addException(input: AddExceptionInput): Exception {
   const group = db.select().from(critGroups).where(eq(critGroups.id, input.critGroupId)).get();
   if (!group) throw new ValidationError("unknown crit group");
-
-  const week = db.select().from(weeks).where(eq(weeks.week, input.week)).get();
-  if (!week) throw new ValidationError("not a teaching week this semester");
-
-  if (!DAY_NAMES.has(input.day)) throw new ValidationError("day must be Mon–Fri");
-  if (!TIME_RE.test(input.startTime) || !TIME_RE.test(input.endTime)) {
-    throw new ValidationError("start and end must be a 24-hour time, e.g. 14:00");
+  if (group.agent !== input.actingAgent) {
+    throw new PermissionError(`only ${group.tutorName} can reschedule ${group.name}'s sessions`);
   }
-  if (input.startTime >= input.endTime) throw new ValidationError("end must be after start");
+
+  const resolved = resolveSessionDate(input.date);
+  if (!resolved) throw new ValidationError("date must be a Mon–Fri session date within a teaching week this semester");
+
+  if (!TIME_RE.test(input.startTime)) throw new ValidationError("start time must be a 24-hour time, e.g. 14:00");
+  const endTime = addSessionMinutes(input.startTime);
 
   const reason = input.reason.trim();
   if (!reason) throw new ValidationError("a reason is required");
@@ -191,7 +220,7 @@ export function addException(input: AddExceptionInput): Exception {
   const existing = db
     .select()
     .from(exceptions)
-    .where(and(eq(exceptions.critGroupId, input.critGroupId), eq(exceptions.week, input.week)))
+    .where(and(eq(exceptions.critGroupId, input.critGroupId), eq(exceptions.week, resolved.week)))
     .get();
   if (existing) {
     db.delete(exceptions).where(eq(exceptions.id, existing.id)).run();
@@ -201,10 +230,10 @@ export function addException(input: AddExceptionInput): Exception {
     .insert(exceptions)
     .values({
       critGroupId: input.critGroupId,
-      week: input.week,
-      day: input.day,
+      week: resolved.week,
+      day: resolved.day,
       startTime: input.startTime,
-      endTime: input.endTime,
+      endTime,
       room: input.room.trim() || null,
       reason,
     })
@@ -212,10 +241,22 @@ export function addException(input: AddExceptionInput): Exception {
     .get();
 }
 
-export function cancelException(id: number): void {
+export function cancelException(id: number, actingAgent: string): void {
+  const exception = db.select().from(exceptions).where(eq(exceptions.id, id)).get();
+  if (!exception) return;
+
+  const group = db.select().from(critGroups).where(eq(critGroups.id, exception.critGroupId)).get();
+  if (group && group.agent !== actingAgent) {
+    throw new PermissionError(`only ${group.tutorName} can cancel ${group.name}'s sessions`);
+  }
+
   db.delete(exceptions).where(eq(exceptions.id, id)).run();
 }
 
 export function getCritGroup(id: number): CritGroup | undefined {
   return db.select().from(critGroups).where(eq(critGroups.id, id)).get();
+}
+
+export function getCritGroupByAgent(agent: string): CritGroup | undefined {
+  return db.select().from(critGroups).where(eq(critGroups.agent, agent)).get();
 }

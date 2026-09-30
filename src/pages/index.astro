@@ -1,5 +1,6 @@
 ---
-import { listRoster, listWeeks } from "../lib/db";
+import { currentTutorAgent } from "../lib/auth";
+import { listRoster, listWeeks, sessionDate } from "../lib/db";
 import "../styles.css";
 
 const roster = listRoster();
@@ -11,6 +12,20 @@ const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri"];
 // reschedule form already fetch — no separate schedule data to keep in sync.
 const startTimes = [...new Set(roster.map((g) => g.startTime))].sort();
 const tutorCount = new Set(roster.map((g) => g.tutorName)).size;
+
+// No login system yet — see src/lib/auth.ts. Every permission check below
+// reads through the same function the server routes do, so the UI's "yours
+// vs read-only" split can never drift from what the server will actually
+// accept.
+const tutorAgent = currentTutorAgent();
+const currentGroup = roster.find((g) => g.agent === tutorAgent);
+const ownExceptions = currentGroup?.sessions.filter((s) => s.exceptionId !== null) ?? [];
+
+// The reschedule form's date input is bounded to real teaching days so a
+// tutor can't pick a date the server will just reject.
+const teachingDates = weeks.flatMap((w) => DAYS.map((day) => sessionDate(w.monday, day))).sort();
+const minDate = teachingDates[0];
+const maxDate = teachingDates[teachingDates.length - 1];
 ---
 
 <!doctype html>
@@ -62,6 +77,24 @@ const tutorCount = new Set(roster.map((g) => g.tutorName)).size;
         <li><strong>Live</strong><span>synced across tabs</span></li>
       </ul>
 
+      {currentGroup && (
+        <div class="card you-panel">
+          <p class="you-eyebrow">Signed in as</p>
+          <p class="you-line">
+            <strong>{currentGroup.tutorName}</strong> · tutoring{" "}
+            <a href={`#group-${currentGroup.agent}`}>{currentGroup.name}</a>
+          </p>
+          <p class="you-slot">
+            Standing slot: every {currentGroup.day} {currentGroup.startTime}–{currentGroup.endTime} ·{" "}
+            {currentGroup.room}
+            {ownExceptions.length > 0 && <> · {ownExceptions.length} rescheduled this semester</>}
+          </p>
+          <a class="btn btn-ghost you-link" href={`#group-${currentGroup.agent}`}>
+            View your sessions →
+          </a>
+        </div>
+      )}
+
       <h2 id="timetable-heading">Weekly timetable</h2>
       <p class="section-lede">
         Every group's standing slot at a glance — pick a slot to jump to its
@@ -85,8 +118,11 @@ const tutorCount = new Set(roster.map((g) => g.tutorName)).size;
                   return (
                     <td>
                       {cellGroups.map((g) => (
-                        <a class="slot" href={`#group-${g.agent}`}>
-                          <span class="slot-name">{g.name}</span>
+                        <a class={`slot ${g.agent === tutorAgent ? "slot-mine" : ""}`} href={`#group-${g.agent}`}>
+                          <span class="slot-name">
+                            {g.name}
+                            {g.agent === tutorAgent && <span class="slot-you-tag"> Yours</span>}
+                          </span>
                           <span class="slot-time">{g.startTime}–{g.endTime}</span>
                           <span class="slot-meta">{g.tutorName}</span>
                         </a>
@@ -109,9 +145,17 @@ const tutorCount = new Set(roster.map((g) => g.tutorName)).size;
         {
           roster.map((group) => {
             const exceptionSessions = group.sessions.filter((s) => s.exceptionId !== null);
+            const isMine = group.agent === tutorAgent;
             return (
-              <section class="card group-card" id={`group-${group.agent}`} aria-labelledby={`group-heading-${group.agent}`}>
-                <h3 id={`group-heading-${group.agent}`}>{group.name}</h3>
+              <section
+                class={`card group-card ${isMine ? "group-card-mine" : ""}`}
+                id={`group-${group.agent}`}
+                aria-labelledby={`group-heading-${group.agent}`}
+              >
+                <div class="group-card-head">
+                  <h3 id={`group-heading-${group.agent}`}>{group.name}</h3>
+                  {isMine && <span class="badge">Your group</span>}
+                </div>
                 <p class="standing-slot">
                   Standing slot: every {group.day} {group.startTime}–{group.endTime} ·{" "}
                   {group.tutorName} · {group.room}
@@ -121,7 +165,7 @@ const tutorCount = new Set(roster.map((g) => g.tutorName)).size;
                 ) : (
                   <ul class="exceptions">
                     {exceptionSessions.map((session) => (
-                      <li>
+                      <li data-exception-id={session.exceptionId}>
                         <div class="exception-head">
                           <span class="badge">Week {session.week}</span>
                           <span class="exception-date">{session.date}</span>
@@ -130,79 +174,60 @@ const tutorCount = new Set(roster.map((g) => g.tutorName)).size;
                           Now {session.day} {session.startTime}–{session.endTime} in {session.room} —{" "}
                           {session.reason}
                         </p>
-                        <form method="post" action={`/api/exceptions/${session.exceptionId}/cancel`}>
-                          <button type="submit" class="btn btn-ghost">Cancel, back to standing slot</button>
-                        </form>
+                        {isMine && (
+                          <form method="post" action={`/api/exceptions/${session.exceptionId}/cancel`}>
+                            <button type="submit" class="btn btn-ghost">Cancel, back to standing slot</button>
+                          </form>
+                        )}
                       </li>
                     ))}
                   </ul>
                 )}
+                {!isMine && <p class="view-only-note">View-only — managed by {group.tutorName}.</p>}
               </section>
             );
           })
         }
       </div>
 
-      <div class="card form-card">
-        <form method="post" action="/api/exceptions">
-          <fieldset>
-            <legend>Reschedule a session</legend>
+      {currentGroup && (
+        <div class="card form-card">
+          <form method="post" action="/api/exceptions">
+            <fieldset>
+              <legend>Reschedule {currentGroup.name}'s session</legend>
+              <input type="hidden" name="critGroupId" value={currentGroup.id} />
 
-            <div class="field">
-              <label for="critGroupId">Crit group</label>
-              <select id="critGroupId" name="critGroupId" required>
-                {roster.map((group) => (
-                  <option value={group.id}>
-                    {group.name} ({group.day} {group.startTime}–{group.endTime})
-                  </option>
-                ))}
-              </select>
-            </div>
+              <div class="field">
+                <label for="date">Date</label>
+                <input id="date" name="date" type="date" min={minDate} max={maxDate} required />
+              </div>
 
-            <div class="field">
-              <label for="week">Teaching week</label>
-              <select id="week" name="week" required>
-                {weeks.map((w) => (
-                  <option value={w.week}>
-                    Week {w.week} ({w.monday})
-                  </option>
-                ))}
-              </select>
-            </div>
+              <div class="field">
+                <label for="startTime">Start time</label>
+                <input id="startTime" name="startTime" type="time" required />
+                <span class="end-preview" id="end-preview" aria-live="polite"></span>
+              </div>
 
-            <div class="field">
-              <label for="day">New day</label>
-              <select id="day" name="day" required>
-                {DAYS.map((day) => (
-                  <option value={day}>{day}</option>
-                ))}
-              </select>
-            </div>
+              <div class="field">
+                <label for="room">Room</label>
+                <input id="room" name="room" type="text" placeholder="defaults to the group's usual room" />
+              </div>
 
-            <div class="field">
-              <label for="startTime">New start</label>
-              <input id="startTime" name="startTime" type="time" required />
-            </div>
+              <div class="field field-wide">
+                <label for="reason">Reason</label>
+                <input id="reason" name="reason" type="text" required />
+              </div>
 
-            <div class="field">
-              <label for="endTime">New end</label>
-              <input id="endTime" name="endTime" type="time" required />
-            </div>
+              <p class="field-hint field-wide">
+                Sessions always run 90 minutes — the end time is calculated automatically (e.g. 10:00 → 11:30). Only{" "}
+                {currentGroup.name}'s sessions can be rescheduled here; every other group is view-only above.
+              </p>
 
-            <div class="field">
-              <label for="room">Room</label>
-              <input id="room" name="room" type="text" placeholder="defaults to the group's usual room" />
-            </div>
-
-            <div class="field field-wide">
-              <label for="reason">Reason</label>
-              <input id="reason" name="reason" type="text" required />
-            </div>
-
-            <button type="submit" class="btn btn-primary">Reschedule</button>
-          </fieldset>
-        </form>
-      </div>
+              <button type="submit" class="btn btn-primary">Reschedule</button>
+            </fieldset>
+          </form>
+        </div>
+      )}
     </main>
     <script>
       import { createDirtyTracker, createReconnectGate } from "../lib/live-reload";
@@ -240,6 +265,31 @@ const tutorCount = new Set(roster.map((g) => g.tutorName)).size;
           dirty.markDirty();
         }
       });
+
+      // Preview-only: the server is what actually computes the end time (90
+      // minutes after the start), so this can't drift out of sync with what
+      // gets saved — it just shows the tutor the range before they submit,
+      // since the form itself only asks for a start time.
+      const startTimeInput = document.getElementById("startTime") as HTMLInputElement | null;
+      const endPreview = document.getElementById("end-preview");
+      const updateEndPreview = () => {
+        if (!endPreview) return;
+        const match = startTimeInput?.value.match(/^(\d{2}):(\d{2})$/);
+        if (!match) {
+          endPreview.textContent = "";
+          return;
+        }
+        const total = Number(match[1]) * 60 + Number(match[2]) + 90;
+        if (total >= 24 * 60) {
+          endPreview.textContent = "too late in the day for a 90-minute session";
+          return;
+        }
+        const endH = String(Math.floor(total / 60)).padStart(2, "0");
+        const endM = String(total % 60).padStart(2, "0");
+        endPreview.textContent = `ends ${endH}:${endM}`;
+      };
+      startTimeInput?.addEventListener("input", updateEndPreview);
+      updateEndPreview();
 
       const staleNotice = document.getElementById("stale-notice");
       const reloadUnlessDirty = () => {

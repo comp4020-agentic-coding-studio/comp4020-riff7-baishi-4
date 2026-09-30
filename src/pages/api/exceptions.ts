@@ -1,5 +1,6 @@
 import type { APIRoute } from "astro";
-import { ValidationError, addException } from "../../lib/db";
+import { currentTutorAgent } from "../../lib/auth";
+import { PermissionError, ValidationError, addException } from "../../lib/db";
 import { bus } from "../../lib/events";
 
 // The write half of the roster: reschedule one crit group's session for one
@@ -14,14 +15,20 @@ export const POST: APIRoute = async ({ request, redirect }) => {
   try {
     addException({
       critGroupId: Number(field("critGroupId")),
-      week: Number(field("week")),
-      day: field("day"),
+      date: field("date"),
       startTime: field("startTime"),
-      endTime: field("endTime"),
       room: field("room"),
       reason: field("reason"),
+      actingAgent: currentTutorAgent(),
     });
   } catch (error) {
+    // A PermissionError only reaches here from a hand-crafted request — the
+    // form never submits a critGroupId other than the signed-in tutor's own
+    // — so it gets a flat 403, not the friendly redirect a genuine mistake
+    // (a bad date, a missing reason) gets from ValidationError.
+    if (error instanceof PermissionError) {
+      return new Response(error.message, { status: 403 });
+    }
     if (error instanceof ValidationError) {
       return redirect(`/?error=${encodeURIComponent(error.message)}`, 303);
     }
